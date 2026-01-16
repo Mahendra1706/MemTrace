@@ -1,0 +1,88 @@
+import sys
+from pathlib import Path
+
+# Add parent directory to Python path to allow imports from 'core'
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from typing import List, Dict, Any
+
+from core.memory import MemoryStore
+from core.events import MemoryLayer, MemoryEvent
+
+class ToyAgent:
+    def __init__(self, memory: MemoryStore):
+        self.memory = memory
+        self.step = 0
+
+    def _next_step(self) -> int:
+        self.step += 1
+        return self.step
+
+    def observe(self, user_input: str):
+        step = self._next_step()
+        return {
+            "type": "user_input",
+            "content": user_input,
+            "step": step,
+        }
+    
+    def recall_deadline(self) -> Any:
+        step = self._next_step()
+        return self.memory.read(
+            key="deadline",
+            step=step,
+            metadata={"reason": "answering_user"},
+        )
+
+    def store_deadline(self, deadline: str):
+        step = self._next_step()
+        self.memory.write(
+            key="deadline",
+            value=deadline,
+            step=step,
+            metadata={"source": "user"},
+        )
+    
+    def run_turn(self, user_input: str) -> str:
+        self.observe(user_input)
+
+        # If user provides a deadline, store it
+        if "deadline is" in user_input:
+            deadline = user_input.split("deadline is")[-1].strip()
+            self.store_deadline(deadline)
+            return "Got it. I've noted your deadline."
+
+        # Otherwise, try to recall it
+        if "what is my deadline" in user_input.lower():
+            value = self.recall_deadline()
+            if value is None:
+                return "I'm not sure about your deadline."
+            return f"Your deadline is {value}."
+
+        return "Okay."
+
+
+if __name__ == "__main__":
+    # Create event log to track all memory operations
+    event_log = []
+    
+    # Create a MemoryStore instance with short-term memory layer
+    memory = MemoryStore(
+        memory_layer=MemoryLayer.STM,
+        event_log=event_log
+    )
+    
+    # Create a ToyAgent instance with the memory store
+    agent = ToyAgent(memory)
+    
+    # Now call run_turn on the instance, not the class
+    query = agent.run_turn("deadline is Friday")
+    print(query)
+    
+    ans = agent.run_turn("what is my deadline?")
+    print(ans)
+    
+    # Print memory events
+    print("\nMEMORY EVENTS:")
+    for event in event_log:
+        print(event)

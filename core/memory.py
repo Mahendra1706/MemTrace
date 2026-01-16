@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
-from events import MemoryEvent, MemoryEventType, MemoryLayer
+from .events import MemoryEvent, MemoryEventType, MemoryLayer
 
 
 class MemoryStore:
@@ -57,3 +57,14 @@ class MemoryStore:
         self._event_log.append(event)
 
         return value
+
+    def store_deadline(self, deadline: str):
+        step = self._next_step()
+        self.memory.write(
+            key="deadline",
+            value=deadline,
+            step=step,
+            metadata={"source": "user"},
+        )
+
+    
