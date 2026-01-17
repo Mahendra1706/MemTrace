@@ -1,8 +1,9 @@
-# memory.py
+# core/memory.py
 
 from typing import Any, Dict, List, Optional
+from collections import OrderedDict
 
-from .events import MemoryEvent, MemoryEventType, MemoryLayer
+from core.events import MemoryEvent, MemoryEventType, MemoryLayer
 
 
 class MemoryStore:
@@ -10,9 +11,11 @@ class MemoryStore:
         self,
         memory_layer: MemoryLayer,
         event_log: List[MemoryEvent],
+        capacity: Optional[int] = None,  # NEW
     ):
         self.memory_layer = memory_layer
-        self._store: Dict[str, Any] = {}
+        self.capacity = capacity
+        self._store: OrderedDict[str, Any] = OrderedDict()
         self._event_log = event_log
 
     def write(
@@ -22,11 +25,43 @@ class MemoryStore:
         step: int,
         metadata: Optional[Dict[str, Any]] = None,
     ):
-        # store the value
+        # If key exists, overwrite (UPDATE)
+        if key in self._store:
+            old_value = self._store[key]
+            self._store[key] = value
+
+            event = MemoryEvent.create(
+                event_type=MemoryEventType.UPDATE,
+                memory_layer=self.memory_layer,
+                step=step,
+                key=key,
+                value=value,
+                metadata={
+                    "old_value": old_value,
+                    **(metadata or {}),
+                },
+            )
+            self._event_log.append(event)
+            return
+
+        # If capacity exceeded, evict oldest
+        if self.capacity is not None and len(self._store) >= self.capacity:
+            evicted_key, evicted_value = self._store.popitem(last=False)
+
+            evict_event = MemoryEvent.create(
+                event_type=MemoryEventType.EVICT,
+                memory_layer=self.memory_layer,
+                step=step,
+                key=evicted_key,
+                value=evicted_value,
+                metadata={"reason": "capacity_overflow"},
+            )
+            self._event_log.append(evict_event)
+
+        # Write new value
         self._store[key] = value
 
-        # record the write event
-        event = MemoryEvent.create(
+        write_event = MemoryEvent.create(
             event_type=MemoryEventType.WRITE,
             memory_layer=self.memory_layer,
             step=step,
@@ -34,8 +69,7 @@ class MemoryStore:
             value=value,
             metadata=metadata,
         )
-
-        self._event_log.append(event)
+        self._event_log.append(write_event)
 
     def read(
         self,
@@ -45,7 +79,7 @@ class MemoryStore:
     ) -> Optional[Any]:
         value = self._store.get(key)
 
-        event = MemoryEvent.create(
+        read_event = MemoryEvent.create(
             event_type=MemoryEventType.READ,
             memory_layer=self.memory_layer,
             step=step,
@@ -53,18 +87,6 @@ class MemoryStore:
             value=value,
             metadata=metadata,
         )
-
-        self._event_log.append(event)
+        self._event_log.append(read_event)
 
         return value
-
-    def store_deadline(self, deadline: str):
-        step = self._next_step()
-        self.memory.write(
-            key="deadline",
-            value=deadline,
-            step=step,
-            metadata={"source": "user"},
-        )
-
-    

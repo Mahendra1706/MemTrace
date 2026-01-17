@@ -60,29 +60,3 @@ class ToyAgent:
             return f"Your deadline is {value}."
 
         return "Okay."
-
-
-if __name__ == "__main__":
-    # Create event log to track all memory operations
-    event_log = []
-    
-    # Create a MemoryStore instance with short-term memory layer
-    memory = MemoryStore(
-        memory_layer=MemoryLayer.STM,
-        event_log=event_log
-    )
-    
-    # Create a ToyAgent instance with the memory store
-    agent = ToyAgent(memory)
-    
-    # Now call run_turn on the instance, not the class
-    query = agent.run_turn("deadline is Friday")
-    print(query)
-    
-    ans = agent.run_turn("what is my deadline?")
-    print(ans)
-    
-    # Print memory events
-    print("\nMEMORY EVENTS:")
-    for event in event_log:
-        print(event)
