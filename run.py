@@ -7,9 +7,9 @@ from analysis.explain import explain_failure
 
 
 def print_separator(title: str):
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 62)
     print(f"  {title}")
-    print("=" * 60)
+    print("=" * 62)
 
 
 def print_events(event_log):
