@@ -43,6 +43,14 @@ class ToyAgent:
             metadata={"source": "user"},
         )
 
+    def store_meeting(self, meeting: str):
+        step = self._next_step()
+        self.memory.write(
+            key="meeting",
+            value=meeting,
+            step=step,
+            metadata={"source": "user"},
+        )
 
     
     def run_turn(self, user_input: str) -> str:
@@ -53,6 +61,12 @@ class ToyAgent:
             deadline = user_input.split("deadline is")[-1].strip()
             self.store_deadline(deadline)
             return "Got it. I've noted your deadline."
+
+        # If user provides a meeting, store it
+        if "meeting is" in user_input:
+            meeting = user_input.split("meeting is")[-1].strip()
+            self.store_meeting(meeting)
+            return "Okay."
 
         # Otherwise, try to recall it
         if "what is my deadline" in user_input.lower():
