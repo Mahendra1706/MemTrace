@@ -29,6 +29,7 @@ def main():
     print("AGENT:", agent.run_turn("Wait, my deadline is Wednesday"))
 
     print("\nUSER: What is my deadline?")
+    print("\nUSER: What is my deadline?")
     print("AGENT:", agent.run_turn("What is my deadline?"))
 
     # 5) Evaluation task - expects the FIRST value (Friday)
