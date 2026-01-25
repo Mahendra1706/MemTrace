@@ -8,6 +8,8 @@ def diagnose_failure(event_log, key: str, recall_step: int) -> Dict[str, Any]:
     """
     Diagnose why a memory recall failed.
 
+    for now we have basic and few diagnoses available
+
     Returns a dict with:
     - failure_type
     - evidence (list of strings)
