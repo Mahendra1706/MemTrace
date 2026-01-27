@@ -11,8 +11,8 @@ This document explains the complete workflow of the MemTrace system, from start 
 **What it does**:
 1. Creates an empty `event_log` list (ground truth of all memory operations)
 2. Initializes a `MemoryStore` (STM) with specific capacity
-3. Creates a `ToyAgent` that uses this memory
-4. Runs conversation turns with the agent
+3. Creates a `StructuredAgent` that uses this memory
+4. Sends JSON commands to the agent
 5. Creates a `RecallTask` to evaluate if the agent remembered correctly
 6. Prints events and diagnosis results
 
@@ -20,8 +20,8 @@ This document explains the complete workflow of the MemTrace system, from start 
 ```
 run.py
   ├─> Creates MemoryStore (core/memory.py)
-  ├─> Creates ToyAgent (agent/toy_agent.py)
-  ├─> Runs agent turns → generates MemoryEvents
+  ├─> Creates StructuredAgent (agent/StructuredAgent.py)
+  ├─> Sends JSON commands → generates MemoryEvents
   ├─> Creates RecallTask (tasks/recall_task.py)
   └─> Evaluates and prints results
 ```
@@ -73,29 +73,28 @@ MemoryStore.write("deadline", "Friday", step=2)
 
 ---
 
-### 3. **`agent/toy_agent.py`**
-**Role**: Simple agent that extracts and stores information
+### 3. **`agent/StructuredAgent.py`**
+**Role**: Agent that processes structured JSON commands
 
-**Key Class**: `ToyAgent`
+**Key Class**: `StructuredAgent`
 
 **What it does**:
-- Takes user input
-- Extracts key-value pairs (simple keyword matching)
-- Writes to memory using `MemoryStore.write()`
-- Reads from memory using `MemoryStore.read()`
+- Accepts JSON commands with action, key, and value
+- Executes write and read operations on memory
+- Returns structured results
 - Increments step counter for each operation
 
-**Example**:
-```
-User: "My deadline is Friday"
-  ├─> Agent extracts: key="deadline", value="Friday"
-  ├─> Calls memory.write("deadline", "Friday", step=2)
-  └─> Returns: "Got it, deadline = Friday"
+**Supported Commands**:
+- `{"action": "write", "key": "k1", "value": "v1"}` - Write to memory
+- `{"action": "read", "key": "k1"}` - Read from memory
 
-User: "What is my deadline?"
-  ├─> Agent detects recall request
-  ├─> Calls memory.read("deadline", step=6)
-  └─> Returns: "Your deadline is Friday" (or "I don't remember")
+**Example**:
+```python
+agent.execute_command({"action": "write", "key": "k1", "value": "v1"})
+# Returns: {"status": "success", "action": "write", "key": "k1", "value": "v1", "step": 1}
+
+agent.execute_command({"action": "read", "key": "k1"})
+# Returns: {"status": "success", "action": "read", "key": "k1", "value": "v1", "step": 2}
 ```
 
 ---
@@ -175,38 +174,38 @@ RecallTask.evaluate(event_log)
 2. Create MemoryStore
    └─> capacity=10, event_log=event_log
 
-3. Create ToyAgent
+3. Create StructuredAgent
    └─> memory=MemoryStore
 
-4. User Turn 1: "My deadline is Friday"
-   └─> ToyAgent.run_turn()
-       └─> memory.write("deadline", "Friday", step=2)
+4. Command 1: {"action": "write", "key": "k1", "value": "v1"}
+   └─> agent.execute_command()
+       └─> memory.write("k1", "v1", step=1)
            └─> event_log.append(WRITE event)
 
-5. User Turn 2: "Actually, my deadline is Monday"
-   └─> ToyAgent.run_turn()
-       └─> memory.write("deadline", "Monday", step=4)
+5. Command 2: {"action": "write", "key": "k1", "value": "v2"}
+   └─> agent.execute_command()
+       └─> memory.write("k1", "v2", step=2)
            └─> Detects key exists → UPDATE
            └─> event_log.append(UPDATE event)
 
-6. User Turn 3: "Wait, my deadline is Wednesday"
-   └─> ToyAgent.run_turn()
-       └─> memory.write("deadline", "Wednesday", step=6)
+6. Command 3: {"action": "write", "key": "k1", "value": "v3"}
+   └─> agent.execute_command()
+       └─> memory.write("k1", "v3", step=3)
            └─> event_log.append(UPDATE event)
 
-7. User Turn 4: "What is my deadline?"
-   └─> ToyAgent.run_turn()
-       └─> memory.read("deadline", step=8)
-           └─> Returns "Wednesday"
+7. Command 4: {"action": "read", "key": "k1"}
+   └─> agent.execute_command()
+       └─> memory.read("k1", step=4)
+           └─> Returns "v3"
            └─> event_log.append(READ event)
 
 8. Create RecallTask
-   └─> key="deadline", expected_value="Friday", write_step=2
+   └─> key="k1", expected_value="v1", write_step=1
 
 9. Evaluate
    └─> RecallTask.evaluate(event_log)
-       └─> Finds READ event at step=8
-       └─> value="Wednesday" ≠ expected="Friday"
+       └─> Finds READ event at step=4
+       └─> value="v3" ≠ expected="v1"
        └─> Calls diagnose_failure()
            └─> Detects UPDATE events
            └─> Returns failure_type="overwritten"
@@ -227,10 +226,10 @@ After running, the `event_log` contains a chronological record:
 
 ```python
 [
-    MemoryEvent(type=WRITE, layer=STM, step=2, key="deadline", value="Friday"),
-    MemoryEvent(type=UPDATE, layer=STM, step=4, key="deadline", value="Monday", metadata={"old_value": "Friday"}),
-    MemoryEvent(type=UPDATE, layer=STM, step=6, key="deadline", value="Wednesday", metadata={"old_value": "Monday"}),
-    MemoryEvent(type=READ, layer=STM, step=8, key="deadline", value="Wednesday"),
+    MemoryEvent(type=WRITE, layer=STM, step=1, key="k1", value="v1"),
+    MemoryEvent(type=UPDATE, layer=STM, step=2, key="k1", value="v2", metadata={"old_value": "v1"}),
+    MemoryEvent(type=UPDATE, layer=STM, step=3, key="k1", value="v3", metadata={"old_value": "v2"}),
+    MemoryEvent(type=READ, layer=STM, step=4, key="k1", value="v3"),
 ]
 ```
 
@@ -263,10 +262,10 @@ After running, the `event_log` contains a chronological record:
 
 | File | Role | Key Responsibility |
 |------|------|-------------------|
-| `run.py` | **Orchestrator** | Sets up scenario, runs agent, evaluates results |
+| `run.py` | **Orchestrator** | Sets up scenario, sends commands, evaluates results |
 | `core/events.py` | **Data Models** | Defines event types and structures |
 | `core/memory.py` | **Storage Engine** | Manages memory operations and logging |
-| `agent/toy_agent.py` | **Agent Logic** | Extracts info, interacts with memory |
+| `agent/StructuredAgent.py` | **Agent Logic** | Processes JSON commands, interacts with memory |
 | `tasks/recall_task.py` | **Evaluator** | Checks if recall was correct |
 | `analysis/diagnose.py` | **Diagnostician** | Explains why recall failed |
 
@@ -280,14 +279,14 @@ After running, the `event_log` contains a chronological record:
    ```
 
 2. **Observe**:
-   - Agent conversations
+   - JSON command execution
    - Memory events log
    - Task evaluation result
    - Failure diagnosis (if failed)
 
 3. **Modify scenarios** in `run.py`:
    - Change capacity for different behaviors
-   - Add more conversation turns
+   - Add more JSON commands
    - Test different recall expectations
 
 ---
@@ -298,7 +297,8 @@ After running, the `event_log` contains a chronological record:
 - **Step numbers matter**: They show temporal ordering
 - **RecallTask auto-finds reads**: No need to specify exact step
 - **Diagnosis is automatic**: Just check the failure info
+- **Use JSON commands**: Structured format makes testing easier
 
 ---
 
-**Last Updated**: 2026-01-24
+**Last Updated**: 2026-01-27

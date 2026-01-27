@@ -1,6 +1,5 @@
 from analysis.diagnose import diagnose_failure
-
-#abc
+ 
 class RecallTask:
 
     def __init__(
@@ -51,3 +50,74 @@ class RecallTask:
         )
         return False, diagnosis
 
+
+def auto_evaluate_all(event_log):
+    """
+    Automatically evaluate all READ events in the event log.
+    
+    For each READ event:
+    1. Find the original WRITE event for that key
+    2. Create a RecallTask with the original value
+    3. Evaluate using existing logic
+    
+    Returns:
+        List of results for each READ event
+    """
+    results = []
+    
+    # Find all READ events
+    read_events = [e for e in event_log if e.event_type.value == "read"]
+    
+    if not read_events:
+        return []
+    
+    for read_event in read_events:
+        key = read_event.key
+        
+        # Find the FIRST WRITE event for this key
+        original_write = None
+        for event in event_log:
+            if (event.event_type.value == "write" and event.key == key):
+                original_write = event
+                break
+        
+        # If no write found, diagnose as never_written
+        if original_write is None:
+            diagnosis = diagnose_failure(
+                event_log=event_log,
+                key=key,
+                recall_step=read_event.step,
+            )
+            results.append({
+                "key": key,
+                "read_step": read_event.step,
+                "read_value": read_event.value,
+                "expected_value": None,
+                "passed": False,
+                "failure_type": diagnosis["failure_type"],
+                "evidence": diagnosis["evidence"]
+            })
+            continue
+        
+        # Create RecallTask with original write value
+        task = RecallTask(
+            key=key,
+            expected_value=original_write.value,
+            write_step=original_write.step
+        )
+        
+        # Evaluate
+        passed, info = task.evaluate(event_log)
+        
+        results.append({
+            "key": key,
+            "read_step": read_event.step,
+            "read_value": read_event.value,
+            "expected_value": original_write.value,
+            "passed": passed,
+            "failure_type": info.get("failure_type", "N/A"),
+            "evidence": info.get("evidence", []),
+            "info": info
+        })
+    
+    return results

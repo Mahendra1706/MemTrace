@@ -54,5 +54,5 @@ class MemoryEvent:
     def __str__(self):
         return (
             f"[step={self.step}] {self.event_type.value.upper()} "
-            f"({self.memory_layer.value}) key={self.key} meta={self.metadata}"
+            f"key={self.key} value={self.value} meta={self.metadata}"
         )

@@ -8,8 +8,6 @@ def diagnose_failure(event_log, key: str, recall_step: int) -> Dict[str, Any]:
     """
     Diagnose why a memory recall failed.
 
-    for now we have basic and few diagnoses available
-
     Returns a dict with:
     - failure_type
     - evidence (list of strings)
@@ -76,6 +74,30 @@ def diagnose_failure(event_log, key: str, recall_step: int) -> Dict[str, Any]:
                 "evidence": [
                     f"READ at step {recall_step} returned None",
                     f"Memory existed but was not retrieved",
+                ],
+            }
+
+    # 5️⃣ LLM Hallucination - memory is correct but value is wrong
+    # This happens when there's no memory issue (no eviction, no overwrite)
+    # but the recalled value doesn't match what was stored
+    for rd in reads:
+        if rd.step == recall_step and rd.value is not None:
+            # Get the current value in memory at recall time
+            current_value = rd.value
+            
+            # Get the original write value
+            original_value = writes[0].value if writes else None
+            
+            # If memory has correct value but it doesn't match expected original
+            # This means memory system is working, but LLM returned wrong value
+            return {
+                "failure_type": "llm_hallucination",
+                "evidence": [
+                    f"Memory system working correctly",
+                    f"Key '{key}' stored in memory with value '{current_value}'",
+                    f"Expected original value: '{original_value}'",
+                    f"No eviction or corruption detected",
+                    f"Issue: LLM/Agent returned incorrect value",
                 ],
             }
 
