@@ -72,17 +72,36 @@ class StructuredAgent:
                 }
             
             step = self._next_step()
-            value = self.memory.read(
-                key=key,
-                step=step,
-                metadata={"reason": "command_read"},
-            )
+            
+            # Check if returned_value is provided (simulating LLM response)
+            if "returned_value" in command:
+                # Use the provided value (simulates LLM hallucination)
+                returned_value = command["returned_value"]
+                
+                # Manually create READ event with the returned value
+                from core.events import MemoryEvent, MemoryEventType
+                read_event = MemoryEvent.create(
+                    event_type=MemoryEventType.READ,
+                    memory_layer=self.memory.memory_layer,
+                    step=step,
+                    key=key,
+                    value=returned_value,
+                    metadata={"reason": "command_read", "simulated": True},
+                )
+                self.memory._event_log.append(read_event)
+            else:
+                # Normal behavior: read from memory
+                returned_value = self.memory.read(
+                    key=key,
+                    step=step,
+                    metadata={"reason": "command_read"},
+                )
             
             return {
                 "status": "success",
                 "action": "read",
                 "key": key,
-                "value": value,
+                "value": returned_value,
                 "step": step,
             }
         

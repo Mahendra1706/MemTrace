@@ -34,16 +34,17 @@ def diagnose_failure(event_log, key: str, recall_step: int) -> Dict[str, Any]:
         elif event.event_type == MemoryEventType.READ:
             reads.append(event)
 
-    # 1️⃣ Never written
+    # Never written - Invalid read operation
     if not writes:
         return {
-            "failure_type": "memory_never_written",
+            "failure_type": "invalid_read",
             "evidence": [
-                f"No WRITE event found for key '{key}' before step {recall_step}"
+                f"No WRITE event found for key '{key}' before step {recall_step}",
+                f"Attempted to read a key that was never stored"
             ],
         }
 
-    # 2️⃣ Evicted before recall
+    # Evicted before recall
     for ev in evictions:
         if ev.step < recall_step:
             return {
@@ -55,7 +56,7 @@ def diagnose_failure(event_log, key: str, recall_step: int) -> Dict[str, Any]:
                 ],
             }
 
-    # 3️⃣ Overwritten before recall
+    # Overwritten before recall
     for up in updates:
         if up.step < recall_step:
             return {
@@ -66,18 +67,21 @@ def diagnose_failure(event_log, key: str, recall_step: int) -> Dict[str, Any]:
                 ],
             }
 
-    # 4️⃣ Retrieval miss
+    # Check if READ returned None (memory_evicted - indirect)
+    # This happens when key was evicted but we don't have explicit EVICT event for it
+    # (e.g., evicted when another key was written)
     for rd in reads:
         if rd.step == recall_step and rd.value is None:
             return {
-                "failure_type": "retrieval_miss",
+                "failure_type": "memory_evicted",
                 "evidence": [
+                    f"Key '{key}' was written at step {writes[0].step}",
                     f"READ at step {recall_step} returned None",
-                    f"Memory existed but was not retrieved",
+                    f"Likely evicted due to capacity overflow (indirect eviction)",
                 ],
             }
 
-    # 5️⃣ LLM Hallucination - memory is correct but value is wrong
+    # LLM Hallucination - memory is correct but value is wrong
     # This happens when there's no memory issue (no eviction, no overwrite)
     # but the recalled value doesn't match what was stored
     for rd in reads:
