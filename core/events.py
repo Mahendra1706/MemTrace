@@ -52,7 +52,9 @@ class MemoryEvent:
         )
 
     def __str__(self):
+        # Display STM or LTM instead of short_term or long_term
+        layer_name = self.memory_layer.name  # Gets 'STM' or 'LTM'
         return (
-            f"[step={self.step}] {self.event_type.value.upper()} "
+            f"[{layer_name}] [step={self.step}] {self.event_type.value.upper()} "
             f"key={self.key} value={self.value} meta={self.metadata}"
         )

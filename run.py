@@ -1,92 +1,16 @@
 from core.events import MemoryLayer
-from core.memory import MemoryStore
 from agent.StructuredAgent import StructuredAgent
 from tasks.recall_task import auto_evaluate_all
-
 from scenario import generate_scenario
-
-def run_scenario(scenario, capacity):
-    """
-    Run a scenario with given memory capacity and return event log.
-    """
-    print(f"\n{'='*60}")
-    print(f"Scenario: {scenario.name}")
-    print(f"Capacity: {capacity}")
-    print('='*60)
-    
-    event_log = []
-    
-    memory = MemoryStore(
-        capacity=capacity,
-        event_log=event_log,
-        memory_layer=MemoryLayer.STM,
-    )
-    
-    agent = StructuredAgent(memory)
-    
-    # Execute all actions
-    print("\nExecuting actions: \n")
-    for action in scenario.actions:
-        result = agent.execute_command(action)
-        print(f"  Command: {action}")
-    
-    # Show all events from event_log 
-    print("\nEvent Log (all memory operations):")
-    for event in event_log:
-        print(f"  {event}")
-    
-    return event_log
-
-
-
-def print_diagnosis(results):
-    """
-    Print diagnosis results in a readable format.
-    """
-    print("\n" + "-"*60)
-    print("AUTO-DIAGNOSIS")
-    print("-"*60)
-    
-    if not results:
-        print("  ⚠️  No READ events found")
-        return
-    
-    for i, result in enumerate(results, 1):
-        key = result['key']
-        read_step = result['read_step']
-        read_value = result['read_value']
-        expected = result['expected_value']
-        
-        print(f"\n[{i}] Key '{key}' (read at step {read_step})")
-        
-        if result['passed']:
-            print(f"    ✅ PASSED: Successfully recalled '{key}'='{expected}'")
-        else:
-            print(f"    ❌ FAILED")
-            print(f"       Expected: '{expected}'")
-            print(f"       Got:      '{read_value}'")
-            print(f"       Failure:  {result['failure_type']}")
-            print(f"       Evidence:")
-            for line in result['evidence']:
-                print(f"         • {line}")
-    
-    # Summary
-    passed = sum(1 for r in results if r['passed'])
-    failed = sum(1 for r in results if not r['passed'])
-    print(f"\n{'='*60}")
-    print(f"Summary: {passed} passed, {failed} failed")
-    print('='*60)
 
 
 def main():
     """
     Run scenarios with different capacities and auto-diagnose.
     """
-    # Generate 50 random scenarios
-    from scenario import generate_scenario
     
     print("\n" + "="*60)
-    print("MEMTRACE RANDOM TESTING - 50 Scenarios")
+    print("MEMTRACE RANDOM TESTING - 1000 Scenarios")
     print("="*60)
     
     # Statistics counters
@@ -96,50 +20,36 @@ def main():
         "failed": 0,
         "memory_evicted": 0,
         "memory_overwritten": 0,
-        "llm_hallucination": 0,
         "invalid_read": 0,
         "unknown": 0,
+        "critical_failures": 0,
+        "critical_evictions": 0,
+        "critical_overwrites": 0,
     }
     
-    # Generate 50 random scenarios
+    # Generate 1000 random scenarios
     for i in range(1000):
         scenario = generate_scenario(
             scenario_id=i,
             num_steps=10,
             num_keys=5,
             read_prob=0.3,
-            capacities=[10,15,20,25,30],
+            capacities=[10, 15, 20, 25, 30],
             seed=42
         )
         
         capacity = scenario.capacity
-        
-        # Run scenario (commented out verbose output)
-        # print(f"\n{'='*60}")
-        # print(f"Scenario: {scenario.name}")
-        # print(f"Capacity: {capacity}")
-        # print('='*60)
-        
         event_log = []
         
-        memory = MemoryStore(
-            capacity=capacity,
-            event_log=event_log,
-            memory_layer=MemoryLayer.STM,
+        # Create agent with STM capacity
+        agent = StructuredAgent(
+            stm_capacity=capacity,
+            event_log=event_log
         )
         
-        agent = StructuredAgent(memory)
-        
-        # Execute all actions (commented out verbose output)
-        # print("\nExecuting actions:")
+        # Execute all actions
         for action in scenario.actions:
             result = agent.execute_command(action)
-            # print(f"  Command: {action}")
-        
-        # Show all events from event_log (commented out)
-        # print("\nEvent Log (all memory operations):")
-        # for event in event_log:
-        #     print(f"  {event}")
         
         # Auto-diagnose all READ events
         results = auto_evaluate_all(event_log)
@@ -154,9 +64,15 @@ def main():
                 failure_type = result["failure_type"]
                 if failure_type in stats:
                     stats[failure_type] += 1
-        
-        # Print diagnosis (commented out)
-        # print_diagnosis(results)
+                
+                # Count critical failures
+                if result.get("is_critical", False):
+                    stats["critical_failures"] += 1
+                    
+                    if failure_type == "memory_evicted":
+                        stats["critical_evictions"] += 1
+                    elif failure_type == "memory_overwritten":
+                        stats["critical_overwrites"] += 1
     
     # Print final statistics
     print("\n" + "="*60)
@@ -165,14 +81,14 @@ def main():
     print(f"Total Reads: {stats['total']}")
     print(f"✅ Passed: {stats['passed']} ({stats['passed']/stats['total']*100:.1f}%)")
     print(f"❌ Failed: {stats['failed']} ({stats['failed']/stats['total']*100:.1f}%)")
+    
     print("\nFailure Breakdown:")
     print(f"  • Memory Evicted: {stats['memory_evicted']}")
     print(f"  • Memory Overwritten: {stats['memory_overwritten']}")
     print(f"  • Invalid Read: {stats['invalid_read']}")
-    print(f"  • LLM Hallucination: {stats['llm_hallucination']}")
     print(f"  • Unknown: {stats['unknown']}")
     
-    # Calculate advanced metrics
+    # Advanced metrics
     print("\n" + "-"*60)
     print("ADVANCED METRICS")
     print("-"*60)
@@ -195,12 +111,11 @@ def main():
     else:
         print("\nMemory Failure Rate: N/A")
     
-    # 3. Dominant Failure Mode (argmax over failure types)
+    # 3. Dominant Failure Mode
     failure_types = {
         'Memory Evicted': stats['memory_evicted'],
         'Memory Overwritten': stats['memory_overwritten'],
         'Invalid Read': stats['invalid_read'],
-        'LLM Hallucination': stats['llm_hallucination'],
         'Unknown': stats['unknown']
     }
     
@@ -212,6 +127,19 @@ def main():
         print(f"  ({dominant_count}/{stats['failed']} failures, {dominant_pct:.1f}%)")
     else:
         print("\nDominant Failure Mode: N/A (no failures)")
+    
+    # 4. Critical Failures (NEW!)
+    print("\n" + "-"*60)
+    print("CRITICAL FAILURES (High-Importance Data Loss)")
+    print("-"*60)
+    print(f"Total Critical Failures: {stats['critical_failures']}")
+    print(f"  • Critical Evictions: {stats['critical_evictions']}")
+    print(f"  • Critical Overwrites: {stats['critical_overwrites']}")
+    
+    if memory_failures > 0:
+        critical_rate = (stats['critical_failures'] / memory_failures) * 100
+        print(f"\nCritical Failure Rate: {critical_rate:.1f}%")
+        print(f"  ({stats['critical_failures']}/{memory_failures} memory failures were critical)")
     
     print("="*60)
 

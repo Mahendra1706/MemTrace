@@ -1,0 +1,28 @@
+{
+    "user_id": "mahendra_01",
+    "action": "ADD_MEMORY",
+    "payload": {
+        "fact": "Mahendra prefers Pizza over Pasta for dinner.",
+        "entities": [
+            {
+                "key": "user_name",
+                "value": "Mahendra"
+            },
+            {
+                "key": "fav_food",
+                "value": "Pizza"
+            },
+            {
+                "key": "disliked_food",
+                "value": "Pasta"
+            }
+        ],
+        "metadata": {
+            "importance": 9,
+            "category": "preferences",
+            "source": "conversation_turn_5",
+            "ttl": "unlimited"
+        }
+    },
+    "storage_target": "LTM"
+}

@@ -116,6 +116,8 @@ def auto_evaluate_all(event_log):
             "expected_value": original_write.value,
             "passed": passed,
             "failure_type": info.get("failure_type", "N/A"),
+            "is_critical": info.get("is_critical", False), 
+            "importance": info.get("importance", 0.0),      
             "evidence": info.get("evidence", []),
             "info": info
         })
