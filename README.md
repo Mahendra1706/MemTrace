@@ -411,6 +411,6 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Version**: 2.0.0 (LTM Branch)  
+**Version**: 1.1.0 (LTM Branch)  
 **Status**: Research Prototype  
 **Last Updated**: 2026-02-09
