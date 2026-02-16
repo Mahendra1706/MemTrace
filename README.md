@@ -363,8 +363,8 @@ def auto_evaluate_all(event_log: List[MemoryEvent]) -> List[Dict[str, Any]]
         "expected_value": Any,
         "passed": bool,
         "failure_type": str,
-        "is_critical": bool,      # NEW
-        "importance": float,      # NEW
+        "is_critical": bool,      
+        "importance": float,      
         "evidence": List[str]
     }
 ]
@@ -406,11 +406,10 @@ MIT License - See LICENSE file for details
 ## 📞 Contact
 
 - **GitHub**: [Mahendra1706/MemTrace](https://github.com/Mahendra1706/MemTrace)
-- **Branch**: `ltm` (latest features)
-- **Main**: `main` (stable)
+- **Branch**: `main` (latest features)
 
 ---
 
-**Version**: 1.1.0 (LTM Branch)  
+**Version**: 1.1.0 (Main Branch)  
 **Status**: Research Prototype  
-**Last Updated**: 2026-02-09
+**Last Updated**: 2026-02-16
