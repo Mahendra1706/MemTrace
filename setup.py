@@ -11,10 +11,10 @@ long_description = (this_directory / "README.md").read_text(encoding='utf-8')
 
 setup(
     name="memtrace",
-    version="1.0.0",
+    version="1.0.1",
     author="Mahendra Gurjar",
     author_email="madhugurjar1706@gmail.com",
-    description="A statistical testing framework for memory systems in LLM agents",
+    description="Memory diagnosis library for LLM agents — event logging, root cause analysis, semantic failure detection",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/Mahendra1706/MemTrace",
@@ -34,23 +34,20 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
-        
+        "groq>=0.4.0",
+        "python-dotenv>=1.0.0",
+        "sentence-transformers>=2.2.0",
+        "numpy>=1.21.0",
     ],
     extras_require={
         "dev": [
             "pytest>=7.0",
             "black>=22.0",
-            "mypy>=0.950",
-            "flake8>=4.0",
-        ],
-        "viz": [
-            "matplotlib>=3.5",
-            "seaborn>=0.11",
         ],
     },
     entry_points={
         "console_scripts": [
-            "memtrace=run:main",
+            "memtrace=memtrace:_cli",
         ],
     },
     keywords="llm agents memory testing diagnosis event-sourcing",
