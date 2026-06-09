@@ -1,415 +1,194 @@
 # MemTrace
 
-**Automated Memory Diagnosis Framework for LLM Agents**
+**Memory Diagnosis Library for LLM Agents**
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Backend: Groq](https://img.shields.io/badge/backend-Groq-orange.svg)](https://console.groq.com)
 
 ---
 
-## 🎯 Overview
+## What is MemTrace?
 
-**MemTrace** is a diagnostic framework for detecting and analyzing memory failures in LLM-based agents. It uses **event sourcing** to track every memory operation and provides **automated root cause analysis** with statistical insights.
+MemTrace is a diagnostic framework that watches how an LLM agent uses its memory and tells you exactly when and why it failed.
 
-### Key Features
-
-- ✅ **Automated Testing** - Generate and run 1000+ random scenarios
-- ✅ **Smart Diagnosis** - Automatic root cause analysis for all failures
-- ✅ **Importance Tracking** - Detect critical data loss (high-importance memories)
-- ✅ **Multi-Layer Memory** - STM (Short-Term) and LTM (Long-Term) support
-- ✅ **Statistical Analysis** - Comprehensive metrics and failure breakdowns
-- ✅ **Event Sourcing** - Complete audit trail of all memory operations
-
-### What Problems Does It Solve?
-
-- **Memory Eviction**: Data lost due to capacity constraints
-- **Memory Overwriting**: Important data replaced by new writes
-- **Invalid Reads**: Attempts to read non-existent keys
-- **Critical Failures**: Loss of high-importance information
+It logs every `WRITE`, `READ`, `UPDATE`, and `EVICT` event, then runs a root-cause analysis after the conversation to tell you **which step broke and why**.
 
 ---
 
-## 🚀 Quick Start
-
-### Installation
+## Quick Start
 
 ```bash
-git clone -b ltm https://github.com/Mahendra1706/MemTrace.git
+git clone https://github.com/Mahendra1706/MemTrace.git
 cd MemTrace
-pip install -e .
+pip install -r requirements.txt
+export GROQ_API_KEY='gsk_...'
+
+# interactive CLI
+python3 memtrace.py   
 ```
 
-> **Note**: The `ltm` branch contains the latest version with importance tracking and critical failure detection.
+**Or use as a library:**
 
-### Run Tests
+```python
+from memtrace import MemTrace
+
+mt = MemTrace(api_key="gsk_...", stm_capacity=5)
+
+# Batch mode
+mt.run([
+    "My meeting is at 3pm.",
+    "The wifi password is guest99.",
+    "What time is my meeting?",
+])
+
+# Live chat mode
+mt.chat()
+```
+
+---
+
+## Architecture
+
+```
+memtrace.py          ← entry point (CLI + library)
+core/
+  events.py          ← MemoryEvent, MemoryEventType, MemoryLayer
+  stm.py             ← Short-term memory (capacity-limited, FIFO eviction)
+  ltm.py             ← Long-term memory (unlimited, no eviction)
+  memory_file.py     ← Generates readable "notebook" from STM+LTM state
+agent/
+  LLMAgent.py        ← Groq-powered agent that reads notebook, writes memory
+analysis/
+  diagnose.py        ← Root cause analysis engine
+  semantic.py        ← Semantic similarity checker (diagnosis only)
+tasks/
+  recall_task.py     ← Evaluates every READ against its original WRITE
+cookbook/
+  batch_example.py   ← Example usage
+```
+
+---
+
+## Why a Memory File (Notebook) Instead of Full Retrieval?
+
+Most agent memory systems work like this:
+> LLM guesses a key → system fetches it → LLM uses the result
+
+The problem: **the LLM has no visibility into what keys exist.** If it stored `project_meeting_time` but later asks for `meeting_time`, retrieval returns nothing. The LLM has no way to self-correct — it doesn't know the key even exists.
+
+MemTrace uses a different approach: **inject the entire memory state as a structured text notebook into the prompt.**
+
+```
+YOUR MEMORY NOTEBOOK:
+[SHORT-TERM MEMORY]
+  project_meeting_time: 3pm
+  wifi_password: guest99
+
+[LONG-TERM MEMORY]
+  user_name: Mahendra
+```
+
+The LLM can now *read* its memory like a file. If it stored `project_meeting_time` but thinks of it as `meeting time`, it can still find it — because it sees all keys at once and reasons over them natively.
+
+**Trade-off**: This scales with memory size. For very large LTM, you'd need to summarize or page the notebook. For the agent memory sizes MemTrace targets (tens to low hundreds of entries), a full notebook is the right call — it gives the LLM total control with zero black-box retrieval.
+
+---
+
+## Why Semantic Search Only in Diagnosis — Not in Retrieval?
+
+This is the key design decision.
+
+If you add semantic search to the retrieval layer:
+```
+LLM asks for "gathering" → semantic finds "meeting_time" → returns "3pm"
+Event log shows: READ meeting_time → "3pm" ← looks like a success
+```
+
+The failure is now **invisible**. The LLM used the wrong concept, the system silently corrected it, and no event was logged. You've hidden the bug.
+
+MemTrace keeps semantic search **strictly in the diagnosis layer**:
+- During conversation: if a READ returns `None`, log it as-is. Don't fix it.
+- After conversation: `diagnose_failure()` uses semantic similarity to *explain* why the failure happened — "LLM searched for `gathering_time`, similar key `project_meeting_time` exists (score 0.79)."
+
+This gives you **full observability**. The failure is caught, logged, and explained — not silently patched.
+
+---
+
+## Failure Types
+
+| Type | Cause | Critical? |
+|------|-------|-----------|
+| `memory_evicted` | Key removed due to STM capacity overflow | If importance ≥ 0.7 |
+| `memory_overwritten` | Key updated with a different value | If old importance ≥ 0.7 |
+| `retrieval_miss` | LLM used wrong key name (typo/synonym) | Yes |
+| `llm_hallucination` | Value returned doesn't match what was stored | Yes |
+| `invalid_read` | Key was never written | No |
+
+### Diagnosis Priority Chain (no conflicts)
+
+```
+Key never written? → check semantic → retrieval_miss or invalid_read
+Key evicted?       → memory_evicted
+Key overwritten?   → memory_overwritten
+Read returned None?→ memory_evicted (indirect)
+Wrong value?       → check semantic → retrieval_miss or llm_hallucination
+```
+
+Each case returns immediately — first match wins, no ambiguity.
+
+---
+
+## Event Log
+
+Every operation is logged automatically:
+
+```
+[STM] [step=1] WRITE key=parking_spot value=B-14
+[STM] [step=2] WRITE key=lunch_order  value=#1234
+[STM] [step=3] EVICT key=parking_spot  reason=capacity_overflow
+[STM] [step=3] WRITE key=wifi_password value=guest99
+[STM] [step=4] READ  key=lunch_order   value=#1234
+[STM] [step=5] READ  key=parking_spot  value=None
+```
+
+Diagnosis output:
+
+```
+✅  step=4  lunch_order = '#1234'
+❌  step=5  parking_spot — memory_evicted
+       Key 'parking_spot' was written at step 1
+       Evicted at step 3 due to capacity_overflow
+       Importance: 0.30 (normal)
+```
+
+---
+
+# At the end im worried about that if we gave full control of llm for its own behaviour than whats the guarantee that it doesnt mess up that, but here is the try to optimize that thing with every update
+guarantee 
+
+## Requirements
+
+- Python 3.8+
+- `groq` — Groq API client
+- `sentence-transformers` — local semantic model for diagnosis (auto-downloaded on first use, ~90MB, no API key needed)
+- `python-dotenv`
 
 ```bash
-python3 run.py
+pip install groq sentence-transformers python-dotenv
 ```
 
-**Sample Output:**
-```
-============================================================
-MEMTRACE RANDOM TESTING - 1000 Scenarios
-============================================================
-
-============================================================
-FINAL STATISTICS
-============================================================
-Total Reads: 4993
-✅ Passed: 741 (14.8%)
-❌ Failed: 4252 (85.2%)
-
-Failure Breakdown:
-  • Memory Evicted: 2261
-  • Memory Overwritten: 240
-  • Invalid Read: 1708
-  • Unknown: 43
-
-------------------------------------------------------------
-ADVANCED METRICS
-------------------------------------------------------------
-Valid Recall Rate: 22.6%
-  (Excludes 1708 invalid reads)
-
-Memory Failure Rate: 50.1%
-  (Eviction: 2261, Overwrite: 240)
-
-Dominant Failure Mode: Memory Evicted
-  (2261/4252 failures, 53.2%)
-
-------------------------------------------------------------
-CRITICAL FAILURES (High-Importance Data Loss)
-------------------------------------------------------------
-Total Critical Failures: 892
-  • Critical Evictions: 798
-  • Critical Overwrites: 94
-
-Critical Failure Rate: 35.7%
-  (892/2501 memory failures were critical)
-============================================================
-```
+**Supported LLM backend**: Groq only (for now).  
+Get a free API key: https://console.groq.com/keys
 
 ---
 
-## 🧠 Core Concepts
+## License
 
-### The Central Question
-
-**Did the agent return what was originally stored?**
-
-MemTrace compares:
-- **Expected Value**: First WRITE event for a key
-- **Actual Value**: What the agent returned during READ
-
-### Event Sourcing
-
-Every memory operation generates an immutable event:
-
-```python
-MemoryEvent(
-    event_id="uuid",
-    event_type=MemoryEventType.WRITE,
-    memory_layer=MemoryLayer.STM,
-    step=1,
-    key="deadline",
-    value="Friday",
-    importance=0.8,  # NEW: Importance score (0.0-1.0)
-    timestamp=1706345678.123,
-    metadata={}
-)
-```
-
-**Event Types:**
-- `WRITE` - New key-value pair stored
-- `READ` - Value retrieved (or attempted)
-- `UPDATE` - Existing key overwritten
-- `EVICT` - Key removed due to capacity constraints
-
-### Importance Tracking
-
-Each memory has an **importance score** (0.0-1.0):
-- **High importance (≥0.7)**: Critical data (deadlines, user preferences, key facts)
-- **Medium importance (0.4-0.6)**: Useful context
-- **Low importance (<0.4)**: Transient information
-
-**Critical failures** occur when high-importance data is lost.
+MIT — see LICENSE file.
 
 ---
 
-## 🏗️ Architecture
-
-```
-MemTrace/
-├── core/
-│   ├── events.py          # Event data structures
-│   ├── memory.py          # Base memory store
-│   ├── stm.py             # Short-term memory (capacity-limited)
-│   └── ltm.py             # Long-term memory (unlimited)
-├── agent/
-│   └── StructuredAgent.py # Command processor with STM/LTM routing
-├── tasks/
-│   └── recall_task.py     # Auto-evaluation and diagnosis
-├── analysis/
-│   └── diagnose.py        # Root cause analysis
-├── scenario.py            # Random scenario generation
-└── run.py                 # Main orchestrator with statistics
-```
-
-### Data Flow
-
-```
-User Command
-    ↓
-StructuredAgent.execute_command()
-    ↓
-Route to STM or LTM based on layer
-    ↓
-MemoryStore.write() / read()
-    ↓
-MemoryEvent created (with importance)
-    ↓
-Event appended to event_log
-    ↓
-auto_evaluate_all() finds all READ events
-    ↓
-Compare expected vs actual
-    ↓
-If mismatch → diagnose_failure()
-    ↓
-Return failure type + evidence + is_critical
-```
-
----
-
-## 🔍 Failure Types
-
-### 1. Memory Evicted
-**Cause**: Key removed due to capacity constraints
-
-**Example**:
-```python
-WRITE k1=v1 (step 1, importance=0.9)
-EVICT k1=v1 (step 3, reason: capacity_overflow)
-READ k1=None (step 5)
-# Result: CRITICAL FAILURE (high importance lost)
-```
-
-### 2. Memory Overwritten
-**Cause**: Key updated with different value
-
-**Example**:
-```python
-WRITE k1=v1 (step 1, importance=0.8)
-UPDATE k1=v2 (step 2, importance=0.3)
-READ k1=v2 (step 3)
-# Result: CRITICAL FAILURE (important data replaced)
-```
-
-### 3. Invalid Read
-**Cause**: Attempted to read key that was never written
-
-**Example**:
-```python
-READ k1=None (step 1)
-# Result: Test artifact (not a memory failure)
-```
-
----
-
-## 💻 Usage Examples
-
-### Example 1: Basic Usage
-
-```python
-from core.events import MemoryLayer
-from agent.StructuredAgent import StructuredAgent
-from tasks.recall_task import auto_evaluate_all
-
-# Create agent with STM capacity
-event_log = []
-agent = StructuredAgent(stm_capacity=5, event_log=event_log)
-
-# Execute commands
-agent.execute_command({
-    "action": "write",
-    "key": "deadline",
-    "value": "Friday",
-    "layer": "STM",
-    "importance": 0.9  # High importance
-})
-
-agent.execute_command({
-    "action": "read",
-    "key": "deadline"
-})
-
-# Auto-diagnose all reads
-results = auto_evaluate_all(event_log)
-for result in results:
-    print(f"Key: {result['key']}")
-    print(f"Passed: {result['passed']}")
-    if result.get('is_critical'):
-        print("⚠️ CRITICAL FAILURE!")
-```
-
-### Example 2: Random Scenario Testing
-
-```python
-from scenario import generate_scenario
-from agent.StructuredAgent import StructuredAgent
-from tasks.recall_task import auto_evaluate_all
-
-# Generate random scenario
-scenario = generate_scenario(
-    scenario_id=1,
-    num_steps=10,
-    num_keys=5,
-    read_prob=0.3,
-    capacities=[5, 10, 15],
-    seed=42
-)
-
-# Run scenario
-event_log = []
-agent = StructuredAgent(stm_capacity=scenario.capacity, event_log=event_log)
-
-for action in scenario.actions:
-    agent.execute_command(action)
-
-# Evaluate
-results = auto_evaluate_all(event_log)
-```
-
----
-
-## 📊 Key Metrics
-
-### 1. Valid Recall Rate
-**Formula**: `Passed / (Total - Invalid Reads)`
-
-Measures recall success excluding invalid reads (test artifacts).
-
-### 2. Memory Failure Rate
-**Formula**: `(Evictions + Overwrites) / Total`
-
-Percentage of failures caused by memory system issues.
-
-### 3. Critical Failure Rate
-**Formula**: `Critical Failures / Memory Failures`
-
-Percentage of memory failures involving high-importance data.
-
-### 4. Dominant Failure Mode
-Most common failure type (guides optimization efforts).
-
----
-
-## 🎓 Use Cases
-
-### Research
-- Analyze memory failure patterns in LLM agents
-- Study impact of capacity constraints
-- Benchmark different memory architectures
-
-### Development
-- Test memory systems during agent development
-- Detect critical data loss before deployment
-- Validate memory layer interactions (STM ↔ LTM)
-
-### Debugging
-- Diagnose why an agent forgot information
-- Identify capacity bottlenecks
-- Track importance-based failures
-
----
-
-## 🛠️ API Reference
-
-### StructuredAgent
-
-```python
-class StructuredAgent:
-    def __init__(self, stm_capacity: int, event_log: List[MemoryEvent])
-    
-    def execute_command(self, command: Dict[str, Any]) -> Dict[str, Any]
-```
-
-**Command Format**:
-```python
-# Write to STM
-{"action": "write", "key": "k1", "value": "v1", "layer": "STM", "importance": 0.8}
-
-# Write to LTM
-{"action": "write", "key": "k1", "value": "v1", "layer": "LTM", "importance": 0.9}
-
-# Read (tries STM first, then LTM)
-{"action": "read", "key": "k1"}
-```
-
-### auto_evaluate_all
-
-```python
-def auto_evaluate_all(event_log: List[MemoryEvent]) -> List[Dict[str, Any]]
-```
-
-**Returns**:
-```python
-[
-    {
-        "key": str,
-        "read_step": int,
-        "read_value": Any,
-        "expected_value": Any,
-        "passed": bool,
-        "failure_type": str,
-        "is_critical": bool,      
-        "importance": float,      
-        "evidence": List[str]
-    }
-]
-```
-
----
-
-## 🚧 Limitations
-
-### What MemTrace Does NOT Do
-
-1. **Real LLM Integration**: Uses structured commands, not actual LLM calls
-2. **Semantic Understanding**: Simple key-value storage (no embeddings)
-3. **Production Optimization**: Event logging has overhead
-4. **Concurrency**: Single-threaded execution only
-5. **External Memory**: No integration with vector databases
-
----
-
-## 🤝 Contributing
-
-Contributions welcome! Priority areas:
-
-- [ ] Real LLM agent integration (LangChain, AutoGPT)
-- [ ] Visualization dashboard
-- [ ] Advanced eviction policies (LRU, LFU)
-- [ ] Semantic retrieval (embeddings)
-- [ ] Unit tests
-- [ ] Performance optimization
-
----
-
-## 📄 License
-
-MIT License - See LICENSE file for details
-
----
-
-## 📞 Contact
-
-- **GitHub**: [Mahendra1706/MemTrace](https://github.com/Mahendra1706/MemTrace)
-- **Branch**: `main` (latest features)
-
----
-
-**Version**: 1.1.0 (Main Branch)  
-**Status**: Research Prototype  
-**Last Updated**: 2026-02-16
+**Version**: 1.0.1 
+**Status**: Active development  
+**GitHub**: [Mahendra1706/MemTrace](https://github.com/Mahendra1706/MemTrace)
