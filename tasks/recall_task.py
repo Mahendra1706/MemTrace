@@ -13,17 +13,19 @@ class RecallTask:
         self.write_step = write_step
 
 
-    def evaluate(self, event_log):
-        # Find the first READ of this key
-        recall_event = None
+    def evaluate(self, event_log, specific_read_event=None):
+        # Use specific event if provided
+        # Otherwise find the first READ of this key in the raw log
+        recall_event = specific_read_event
 
-        for event in event_log:
-            if (
-                event.event_type.value == "read"
-                and event.key == self.key
-            ):
-                recall_event = event
-                break
+        if recall_event is None:
+            for event in event_log:
+                if (
+                    event.event_type.value == "read"
+                    and event.key == self.key
+                ):
+                    recall_event = event
+                    break
 
         # No recall attempt at all
         if recall_event is None:
@@ -65,11 +67,23 @@ def auto_evaluate_all(event_log):
     """
     results = []
     
-    # Find all READ events
-    read_events = [e for e in event_log if e.event_type.value == "read"]
+    # Find all READ events, deduplicated by (key, step)
+    # We keep the non-None result to avoid false positives.
+    raw_reads = [e for e in event_log if e.event_type.value == "read"]
     
-    if not read_events:
+    if not raw_reads:
         return []
+    
+    # Group by (key, step) — keep non-None value if available
+    seen = {} 
+    for r in raw_reads:
+        group_key = (r.key, r.step)
+        if group_key not in seen:
+            seen[group_key] = r
+        elif r.value is not None and seen[group_key].value is None:
+            seen[group_key] = r  
+    
+    read_events = list(seen.values())
     
     for read_event in read_events:
         key = read_event.key
@@ -106,8 +120,8 @@ def auto_evaluate_all(event_log):
             write_step=original_write.step
         )
         
-        # Evaluate
-        passed, info = task.evaluate(event_log)
+        # Evaluate — pass the deduped read_event directly
+        passed, info = task.evaluate(event_log, specific_read_event=read_event)
         
         results.append({
             "key": key,
