@@ -11,7 +11,7 @@ class ShortTermMemory:
         self.capacity = capacity
         self.layer = MemoryLayer.STM
         self._store = OrderedDict()  
-        self._importance_map = {}  # Track importance for each key
+        self._importance_map = {}  
         self._event_log = event_log 
 
     def stm_write(
@@ -20,7 +20,7 @@ class ShortTermMemory:
         value: Any,
         step: int,
         layer: Optional[MemoryLayer] = MemoryLayer.STM,
-        importance: float = 0.5,  # FIXED: Added importance parameter
+        importance: float = 0.5,
         metadata: Optional[Dict[str, Any]] = None,
     ):
         target_layer = layer if layer is not None else MemoryLayer.STM

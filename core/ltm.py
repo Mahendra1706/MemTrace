@@ -22,7 +22,6 @@ class LongTermMemory:
         importance: float = 0.5,
         metadata: Optional[Dict[str, Any]] = None,
     ):
-        # Use provided layer or default to LTM
         target_layer = layer if layer is not None else self.layer
         if key in self._store:
             old_value = self._store[key]
@@ -47,7 +46,6 @@ class LongTermMemory:
             self._event_log.append(event)
             return
 
-        # Write new value 
         self._store[key] = value
         self._importance_map[key] = importance  
 
